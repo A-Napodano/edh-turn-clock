@@ -2,8 +2,6 @@
 
 A priority-aware chess clock for Commander / EDH, designed for use on a shared phone or tablet at the game table.
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-
 ---
 
 ## The Problem
@@ -16,9 +14,9 @@ Turn Clock implements an **action-triggered priority model**:
 
 - By default, the clock runs on the **active player** (the player whose turn it is)
 - Any player can tap their card to claim priority — the clock immediately transfers to them
-- The ← END TURN button advances to the next player in clockwise turn order
+- The **← END TURN** button advances to the next player in clockwise turn order
 - A center **PAUSE** button is reachable from any seat
-- The **← PASS PRIORITY** button (visible in the bottom bar when a non-active player holds priority) returns the clock to the active player
+- The **← PASS PRIORITY** button (visible in the center when a non-active player holds priority) returns the clock to the active player
 
 This captures the meaningful time sinks — long contemplation before a counterspell, tanking a response to a combo — without requiring button presses for every silent priority pass.
 
