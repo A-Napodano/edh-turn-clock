@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Turn Clock · EDH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #root { height: 100%; }
+
+    @keyframes glow-pulse {
+      0%, 100% { box-shadow: var(--glow-lo); }
+      50%       { box-shadow: var(--glow-hi); }
+    }
+    @keyframes blink-crit {
+      0%, 100% { color: #ff7070; }
+      50%       { color: #cc1a1a; }
+    }
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pop-in {
+      0%   { transform: scale(0.92); opacity: 0; }
+      100% { transform: scale(1);    opacity: 1; }
+    }
+    @keyframes storm-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.5; }
+    }
+    @keyframes bar-glow {
+      0%, 100% { box-shadow: 0 0 5px rgba(224,82,82,0.55); }
+      50%       { box-shadow: 0 0 18px rgba(224,82,82,0.95); }
+    }
+
+    .edh-card-priority { animation: glow-pulse  2s    ease-in-out infinite; }
+    .edh-time-crit     { animation: blink-crit  0.75s ease-in-out infinite; }
+    .edh-storm-badge   { animation: storm-pulse 1.4s  ease-in-out infinite; }
+    .edh-bar-alert     { animation: bar-glow    1s    ease-in-out infinite; border-radius: 2px; }
+
+    .edh-btn {
+      cursor: pointer; outline: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      transition: filter 0.12s ease, transform 0.1s ease;
+    }
+    .edh-btn:hover:not(:disabled)  { filter: brightness(1.2); transform: translateY(-1px); }
+    .edh-btn:active:not(:disabled) { transform: translateY(1px); filter: brightness(0.92); }
+    .edh-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .edh-fade-up { animation: fade-up 0.35s ease forwards; }
+    .edh-pop-in  { animation: pop-in  0.25s ease forwards; }
+
+    .edh-range { width: 100%; accent-color: #27ae60; touch-action: manipulation; }
+
+    input.edh-input {
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s, background 0.3s, color 0.3s;
+      width: 100%;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ─── Player accent themes (MTG mana colors) ───────────────────────────────
+    const THEMES = [
+      { accent: "#d4a017", glow: "rgba(212,160,23,0.25)", deep: "rgba(212,160,23,0.08)" },
+      { accent: "#4a90d9", glow: "rgba(74,144,217,0.25)", deep: "rgba(74,144,217,0.08)" },
+      { accent: "#e05252", glow: "rgba(224,82,82,0.25)",  deep: "rgba(224,82,82,0.08)"  },
+      { accent: "#27ae60", glow: "rgba(39,174,96,0.25)",  deep: "rgba(39,174,96,0.08)"  },
+    ];
+
+    // ─── UI palettes ──────────────────────────────────────────────────────────
+    const DARK = {
+      pageBg:        (v) => v === "setup"
+                       ? "radial-gradient(ellipse at 40% 35%, #0e2010 0%, #050d05 75%)"
+                       : "radial-gradient(ellipse at 50% 50%, #0d2010 0%, #050d05 80%)",
+      bodyBg:        "#050d05",
+      cardBg:        "linear-gradient(150deg, #0c1a0c 0%, #080e08 100%)",
+      cardBorderDef: "#122012",
+      panelBg:       "rgba(6,14,6,0.97)",
+      panelBorder:   "#1a3a1a",
+      panelShadow:   "0 0 80px rgba(39,174,96,0.07), 0 24px 64px rgba(0,0,0,0.6)",
+      labelClr:      "#2a6a2a",
+      headerClr:     "#1a4a1a",
+      nameClr:       "#4a6a4a",
+      timeClr:       "#5a7a5a",
+      progressBg:    "#0a1a0a",
+      dividerClr:    "#1a3a1a",
+      statusBg:      "rgba(0,0,0,0.45)",
+      statusBorder:  "#0f240f",
+      statusClr:     "#2a5a2a",
+      logBg:         "rgba(0,0,0,0.35)",
+      logBorder:     "#0f200f",
+      logClr:        "#2a4a2a",
+      logTurnClr:    "#1a3a1a",
+      logRowBorder:  "#080f08",
+      hintClr:       "#162416",
+      inputBg:       "rgba(255,255,255,0.04)",
+      inputBorder:   "#1a3a1a",
+      inputClr:      "#c8d4c8",
+      btnBg:         "rgba(255,255,255,0.03)",
+      btnBorder:     "#122012",
+      btnClr:        "#3a5a3a",
+      pauseBg:       "rgba(255,255,255,0.04)",
+      pauseBorder:   "#1a3a1a",
+      pauseClr:      "#2a5a2a",
+      elimBorder:    "#200a0a",
+      elimLabelClr:  "#4a1a1a",
+      titleClr:      "#a8c8a8",
+      titleEye:      "#1a5a1a",
+      titleSub:      "#2a5a2a",
+      logToggleClr:  "#1a4a1a",
+      toggleLabel:   "☀ LIGHT",
+    };
+
+    const LIGHT = {
+      pageBg:        (v) => v === "setup"
+                       ? "radial-gradient(ellipse at 40% 35%, #e8f5e0 0%, #f5faf2 75%)"
+                       : "radial-gradient(ellipse at 50% 50%, #e0f0d8 0%, #f5faf2 80%)",
+      bodyBg:        "#f5faf2",
+      cardBg:        "linear-gradient(150deg, #ffffff 0%, #f5fbf2 100%)",
+      cardBorderDef: "#c0dab0",
+      panelBg:       "rgba(255,255,255,0.97)",
+      panelBorder:   "#a8d098",
+      panelShadow:   "0 0 80px rgba(39,174,96,0.06), 0 24px 64px rgba(0,0,0,0.10)",
+      labelClr:      "#2a6a2a",
+      headerClr:     "#3a7a3a",
+      nameClr:       "#1a4a1a",
+      timeClr:       "#2a5a2a",
+      progressBg:    "#cce8bc",
+      dividerClr:    "#b0d0a0",
+      statusBg:      "rgba(255,255,255,0.82)",
+      statusBorder:  "#b0d0a0",
+      statusClr:     "#2a5a2a",
+      logBg:         "rgba(255,255,255,0.82)",
+      logBorder:     "#b0d0a0",
+      logClr:        "#2a4a2a",
+      logTurnClr:    "#5a8a5a",
+      logRowBorder:  "#d0e8c4",
+      hintClr:       "#6a9a6a",
+      inputBg:       "rgba(0,0,0,0.03)",
+      inputBorder:   "#a8d098",
+      inputClr:      "#1a3a1a",
+      btnBg:         "rgba(0,0,0,0.04)",
+      btnBorder:     "#b0d0a0",
+      btnClr:        "#2a6a2a",
+      pauseBg:       "rgba(0,0,0,0.04)",
+      pauseBorder:   "#b0d0a0",
+      pauseClr:      "#2a6a2a",
+      elimBorder:    "#f0c8c8",
+      elimLabelClr:  "#a05050",
+      titleClr:      "#1a4a1a",
+      titleEye:      "#2a6a2a",
+      titleSub:      "#3a7a3a",
+      logToggleClr:  "#3a7a3a",
+      toggleLabel:   "☽ DARK",
+    };
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+    const fmt = (sec) => {
+      sec = Math.max(0, Math.floor(sec));
+      return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+    };
+
+    const nextAlive = (from, total, dead) => {
+      let n = (from + 1) % total;
+      for (let i = 0; i < total; i++) {
+        if (!dead.includes(n)) return n;
+        n = (n + 1) % total;
+      }
+      return from;
+    };
+
+    // ─── Web Audio: two-tone descending chime ─────────────────────────────────
+    function playLowTimeAlert() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [[440, 0], [330, 0.38]].forEach(([freq, delay]) => {
+          const osc  = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+          gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + delay + 0.06);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.48);
+          osc.start(ctx.currentTime + delay);
+          osc.stop(ctx.currentTime + delay + 0.5);
+        });
+      } catch (e) {}
+    }
+
+    // ─── Shared components ────────────────────────────────────────────────────
+    function Badge({ text, color, filled, storm }) {
+      return (
+        <span
+          className={storm ? "edh-storm-badge" : ""}
+          style={{
+            fontFamily: "'Cinzel', serif",
+            fontSize: "8px", letterSpacing: "1.5px",
+            padding: "2px 7px", borderRadius: "3px",
+            border: `1px solid ${color}55`,
+            background: filled ? color : `${color}18`,
+            color: filled ? "#0a0f0a" : color,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {text}
+        </span>
+      );
+    }
+
+    function Divider({ clr }) {
+      return (
+        <div style={{
+          height: "1px",
+          background: `linear-gradient(to right, transparent, ${clr}, transparent)`,
+          margin: "6px 0",
+        }} />
+      );
+    }
+
+    // ─── Player Card ──────────────────────────────────────────────────────────
+    function PlayerCard({ P, idx, name, time, totalTime, isTurn, isPriority, isElim,
+                          isDead, paused, onClaim, onEndTurn, stormWarning }) {
+      const th = THEMES[idx];
+
+      // Percentage-based thresholds — scale with configured time budget
+      const isAlert = time > 0 && time <= totalTime * 0.10; // 10% → sound + red glow + blink
+      const isLow   = time > 0 && time <= totalTime * 0.20; // 20% → amber color shift
+      const canAct  = !isPriority && !isElim && !isDead && !paused;
+      const pct     = Math.max(0, Math.min(1, time / totalTime));
+
+      const timeColor = isDead     ? "#7a3030"
+                      : isAlert    ? "#e05252"
+                      : isLow      ? "#f39c12"
+                      : isPriority ? th.accent
+                      :              P.timeClr;
+
+      return (
+        <div
+          className={isPriority ? "edh-card-priority" : "edh-pop-in"}
+          onClick={canAct ? onClaim : undefined}
+          style={{
+            "--glow-lo": `0 0 12px ${th.glow}`,
+            "--glow-hi": `0 0 32px ${th.glow}, 0 0 64px ${th.deep}`,
+            background: P.cardBg,
+            border: `2px solid ${isPriority ? th.accent : isTurn ? th.accent + "45" : P.cardBorderDef}`,
+            borderRadius: "10px",
+            padding: "14px 16px",
+            display: "flex", flexDirection: "column", gap: "10px",
+            opacity: isElim ? 0.3 : isDead ? 0.5 : 1,
+            transition: "border-color 0.3s, opacity 0.4s, background 0.4s",
+            position: "relative", overflow: "hidden",
+            height: "100%", width: "100%",
+            cursor: canAct ? "pointer" : "default",
+            WebkitTapHighlightColor: "transparent",
+          }}
+        >
+          {/* Top gem-line accent */}
+          <div style={{
+            position: "absolute", top: 0, left: 0, right: 0, height: "2px",
+            background: `linear-gradient(to right, transparent 5%, ${th.accent} 50%, transparent 95%)`,
+            opacity: isPriority ? 0.9 : isTurn ? 0.3 : 0.1,
+            transition: "opacity 0.4s",
+          }} />
+
+          {/* Progress bar — container glows red at ≤10% */}
+          <div
+            className={isAlert ? "edh-bar-alert" : ""}
+            style={{ height: "3px", background: P.progressBg, borderRadius: "2px", overflow: "hidden" }}
+          >
+            <div style={{
+              height: "100%",
+              width: `${pct * 100}%`,
+              background: isDead ? "#3a1a1a" : isAlert ? "#e05252" : isLow ? "#f39c12" : th.accent,
+              borderRadius: "2px",
+              transition: "width 1s linear, background 0.5s",
+            }} />
+          </div>
+
+          {/* Status badges */}
+          <div style={{ display: "flex", gap: "5px", alignItems: "center", flexWrap: "wrap", minHeight: "16px" }}>
+            {isTurn     && !isDead && !isElim && <Badge text="TURN"    color={th.accent} />}
+            {isPriority && !isDead && !isElim && <Badge text={isTurn ? "ACTIVE" : "PRIORITY"} color={th.accent} filled />}
+            {stormWarning && isPriority && !isDead && !isElim && <Badge text="⚡ STORM" color="#e05252" storm />}
+            {isDead && <Badge text="TIME OUT"   color="#8a3030" />}
+            {isElim && <Badge text="ELIMINATED" color="#444"    />}
+          </div>
+
+          {/* Player name */}
+          <div style={{
+            fontFamily: "'Cinzel', serif",
+            fontSize: "12px", fontWeight: 600,
+            color: isPriority ? th.accent : P.nameClr,
+            letterSpacing: "0.5px",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            transition: "color 0.3s",
+          }}>
+            {name}
+          </div>
+
+          {/* Time readout — blinks when ≤10% AND has priority */}
+          <div
+            className={isAlert && isPriority ? "edh-time-crit" : ""}
+            style={{
+              fontFamily: "'Share Tech Mono', monospace",
+              fontSize: "clamp(30px, 5vw, 44px)",
+              lineHeight: 1, letterSpacing: "3px",
+              color: timeColor,
+              textShadow: isPriority && !isDead ? `0 0 16px ${th.glow}` : "none",
+              transition: "color 0.4s, text-shadow 0.4s",
+            }}
+          >
+            {fmt(time)}
+          </div>
+
+          <Divider clr={P.dividerClr} />
+
+          {/* End Turn button — only for active player */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "auto" }}>
+            {isTurn && !isElim && !isDead && (
+              <button
+                className="edh-btn"
+                onClick={e => { e.stopPropagation(); onEndTurn(); }}
+                disabled={paused}
+                style={{
+                  padding: "8px 10px",
+                  background: "#091f11", border: "1px solid #1a5a30",
+                  borderRadius: "5px", color: "#3adf7a",
+                  fontFamily: "'Cinzel', serif", fontSize: "9px", letterSpacing: "2px",
+                }}
+              >
+                ← END TURN
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Setup Screen ─────────────────────────────────────────────────────────
+    function Setup({ onStart, darkMode, toggleDark }) {
+      const P = darkMode ? DARK : LIGHT;
+
+      const [np, setNp]             = useState(4);
+      const [names, setNames]       = useState(["Player 1", "Player 2", "Player 3", "Player 4"]);
+      const [mins, setMins]         = useState(20);
+      const [startingPlayer, setSP] = useState(0);
+
+      useEffect(() => { document.body.style.background = P.bodyBg; }, [darkMode]);
+      useEffect(() => { if (startingPlayer >= np) setSP(0); }, [np]);
+
+      const setName = (i, v) => { const n = [...names]; n[i] = v; setNames(n); };
+
+      const fieldLabel = {
+        fontFamily: "'Cinzel', serif",
+        fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase",
+        color: P.labelClr, display: "block", marginBottom: "9px",
+      };
+
+      return (
+        <div style={{
+          minHeight: "100vh",
+          background: P.pageBg("setup"),
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "24px",
+          transition: "background 0.4s",
+        }}>
+          <div style={{
+            width: "100%", maxWidth: "460px",
+            background: P.panelBg,
+            border: `1px solid ${P.panelBorder}`,
+            borderRadius: "14px", padding: "36px 32px",
+            boxShadow: P.panelShadow,
+            animation: "fade-up 0.4s ease forwards",
+            transition: "background 0.4s, border-color 0.4s, box-shadow 0.4s",
+          }}>
+
+            {/* Title block */}
+            <div style={{ textAlign: "center", marginBottom: "28px", position: "relative" }}>
+              <button
+                className="edh-btn" onClick={toggleDark}
+                style={{
+                  position: "absolute", top: 0, right: 0,
+                  padding: "4px 10px",
+                  background: P.btnBg, border: `1px solid ${P.btnBorder}`,
+                  borderRadius: "5px", color: P.btnClr,
+                  fontFamily: "'Cinzel', serif", fontSize: "9px", letterSpacing: "1px",
+                }}
+              >
+                {P.toggleLabel}
+              </button>
+              <p style={{ fontFamily: "'Cinzel', serif", fontSize: "9px", letterSpacing: "5px", color: P.titleEye, marginBottom: "8px" }}>
+                COMMANDER · EDH
+              </p>
+              <h1 style={{ fontFamily: "'Cinzel', serif", fontSize: "30px", fontWeight: 700, color: P.titleClr, letterSpacing: "2px" }}>
+                Turn Clock
+              </h1>
+              <div style={{ height: "1px", background: `linear-gradient(to right, transparent, ${P.labelClr}, transparent)`, width: "100px", margin: "10px auto" }} />
+              <p style={{ fontFamily: "serif", fontSize: "13px", color: P.titleSub, fontStyle: "italic" }}>
+                Priority-aware timer for EDH
+              </p>
+            </div>
+
+            {/* Player count */}
+            <div style={{ marginBottom: "22px" }}>
+              <label style={fieldLabel}>Number of Players</label>
+              <div style={{ display: "flex", gap: "8px" }}>
+                {[2, 3, 4].map(n => (
+                  <button key={n} className="edh-btn" onClick={() => setNp(n)} style={{
+                    flex: 1, padding: "12px",
+                    background: np === n ? "rgba(39,174,96,0.18)" : P.btnBg,
+                    border: `1px solid ${np === n ? "#27ae60" : P.btnBorder}`,
+                    borderRadius: "7px",
+                    color: np === n ? "#4adf70" : P.btnClr,
+                    fontFamily: "'Cinzel', serif", fontSize: "16px", fontWeight: np === n ? 700 : 400,
+                  }}>{n}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Player names */}
+            <div style={{ marginBottom: "22px" }}>
+              <label style={fieldLabel}>Player Names</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {Array.from({ length: np }).map((_, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <div style={{
+                      width: "10px", height: "10px", borderRadius: "50%", flexShrink: 0,
+                      background: THEMES[i].accent, boxShadow: `0 0 6px ${THEMES[i].glow}`,
+                    }} />
+                    <input
+                      className="edh-input"
+                      value={names[i]}
+                      onChange={e => setName(i, e.target.value)}
+                      placeholder={`Player ${i + 1}`}
+                      style={{ background: P.inputBg, border: `1px solid ${P.inputBorder}`, color: P.inputClr }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Starting player */}
+            <div style={{ marginBottom: "22px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "9px" }}>
+                <label style={{ ...fieldLabel, marginBottom: 0 }}>Starting Player</label>
+                <button
+                  className="edh-btn"
+                  onClick={() => setSP(Math.floor(Math.random() * np))}
+                  style={{
+                    padding: "4px 10px",
+                    background: P.btnBg, border: `1px solid ${P.btnBorder}`,
+                    borderRadius: "5px", color: P.btnClr,
+                    fontFamily: "'Cinzel', serif", fontSize: "9px", letterSpacing: "2px",
+                  }}
+                >
+                  ⚄ RANDOM
+                </button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {Array.from({ length: np }).map((_, i) => {
+                  const th  = THEMES[i];
+                  const sel = startingPlayer === i;
+                  return (
+                    <button key={i} className="edh-btn" onClick={() => setSP(i)} style={{
+                      padding: "9px 14px",
+                      background: sel ? `${th.accent}20` : P.btnBg,
+                      border: `1px solid ${sel ? th.accent : P.btnBorder}`,
+                      borderRadius: "7px",
+                      color: sel ? th.accent : P.btnClr,
+                      fontFamily: "'Cinzel', serif", fontSize: "11px", letterSpacing: "0.5px",
+                      fontWeight: sel ? 700 : 400,
+                      display: "flex", alignItems: "center", gap: "8px",
+                      boxShadow: sel ? `0 0 10px ${th.glow}` : "none",
+                      transition: "all 0.2s ease", flex: "1 1 auto",
+                    }}>
+                      <span style={{
+                        width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0,
+                        background: th.accent, boxShadow: sel ? `0 0 6px ${th.glow}` : "none",
+                      }} />
+                      {names[i] || `Player ${i + 1}`}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Time per player */}
+            <div style={{ marginBottom: "28px" }}>
+              <label style={fieldLabel}>
+                Time per Player — <span style={{ color: "#4adf70" }}>{mins} min</span>
+              </label>
+              <input
+                type="range" className="edh-range"
+                min={5} max={60} step={5} value={mins}
+                onChange={e => setMins(+e.target.value)}
+              />
+            </div>
+
+            {/* Begin */}
+            <button
+              className="edh-btn"
+              onClick={() => onStart({
+                numPlayers: np,
+                names: names.slice(0, np).map(n => n || "Commander"),
+                seconds: mins * 60,
+                startingPlayer,
+              })}
+              style={{
+                width: "100%", padding: "15px",
+                background: "linear-gradient(135deg, #123a18, #1a7a30)",
+                border: "1px solid #27ae60", borderRadius: "8px",
+                color: "#b8f0c8",
+                fontFamily: "'Cinzel', serif", fontSize: "11px", letterSpacing: "4px",
+                boxShadow: "0 4px 24px rgba(39,174,96,0.2)",
+              }}
+            >
+              BEGIN SESSION
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Game Screen ──────────────────────────────────────────────────────────
+    function Game({ config, onReset, darkMode, toggleDark }) {
+      const P = darkMode ? DARK : LIGHT;
+      const { numPlayers, names, seconds, startingPlayer = 0 } = config;
+
+      const [times, setTimes]         = useState(() => Array(numPlayers).fill(seconds));
+      const [activeTurn, setAT]       = useState(startingPlayer);
+      const [priority, setPriority]   = useState(startingPlayer);
+      const [paused, setPaused]       = useState(false);
+      const [turnNum, setTurnNum]     = useState(1);
+      const [eliminated, setElim]     = useState([]);
+      const [log, setLog]             = useState([{ text: `Session begins — ${names[startingPlayer]}'s turn`, t: 1 }]);
+      const [showLog, setShowLog]     = useState(false);
+      const [confirmReset, setCR]     = useState(false);
+      const [confirmedElim, setCE]    = useState(null);
+      const [priorityHeldSec, setPHS] = useState(0);
+
+      // Refs — mutations here never trigger re-renders
+      const alertedRef          = useRef(new Set()); // player indices that have already been alerted
+      const stormLoggedRef      = useRef(false);     // prevents duplicate storm log entries per priority hold
+      const turnAutoAdvancedRef = useRef(false);     // prevents double-firing of active-player timeout advance
+
+      const stormThreshold = Math.floor(seconds * 0.2); // 20% of configured time budget
+      const stormWarning   = priorityHeldSec >= stormThreshold;
+
+      // Sync body background on theme change
+      useEffect(() => { document.body.style.background = P.bodyBg; }, [darkMode]);
+
+      // Auto-clear elimination confirm after 4s
+      useEffect(() => {
+        if (confirmedElim === null) return;
+        const id = setTimeout(() => setCE(null), 4000);
+        return () => clearTimeout(id);
+      }, [confirmedElim]);
+
+      // Reset priority-held counter and storm log flag whenever priority changes
+      useEffect(() => {
+        setPHS(0);
+        stormLoggedRef.current = false;
+      }, [priority]);
+
+      const outOfTime = times.map(t => t <= 0);
+      const dead      = (i) => eliminated.includes(i) || outOfTime[i];
+      const deadList  = names.map((_, i) => dead(i) ? i : -1).filter(i => i >= 0);
+
+      const addLog = useCallback((text) => {
+        setLog(prev => [...prev.slice(-59), { text, t: turnNum }]);
+      }, [turnNum]);
+
+      // ── Core tick: decrement priority holder's clock, increment held counter
+      useEffect(() => {
+        if (paused) return;
+        const id = setInterval(() => {
+          setTimes(prev => {
+            if (prev[priority] <= 0) return prev;
+            const next = [...prev];
+            next[priority] = Math.max(0, next[priority] - 1);
+            return next;
+          });
+          setPHS(prev => prev + 1);
+        }, 1000);
+        return () => clearInterval(id);
+      }, [paused, priority]);
+
+      // ── 10% low-time alert — fires once per player per game session
+      useEffect(() => {
+        const threshold = seconds * 0.1;
+        times.forEach((t, i) => {
+          if (t > 0 && t <= threshold && !alertedRef.current.has(i) && !eliminated.includes(i)) {
+            alertedRef.current.add(i);
+            playLowTimeAlert();
+            addLog(`⚠ ${names[i]} is running low on time (≤10% remaining)`);
+          }
+        });
+      }, [times]);
+
+      // ── Storm warning log — fires once per unbroken priority hold
+      useEffect(() => {
+        if (stormWarning && !stormLoggedRef.current && !paused) {
+          stormLoggedRef.current = true;
+          const m = Math.floor(stormThreshold / 60);
+          const s = stormThreshold % 60;
+          const label = m > 0 ? `${m}m${s > 0 ? ` ${s}s` : ""}` : `${s}s`;
+          addLog(`⚡ STORM — ${names[priority]} has held priority for ${label}+`);
+        }
+      }, [stormWarning]);
+
+      // ── Auto-return priority when an off-turn holder runs out of time
+      useEffect(() => {
+        if (outOfTime[priority] && priority !== activeTurn && !outOfTime[activeTurn]) {
+          setPriority(activeTurn);
+          addLog(`${names[priority]} ran out of time — priority returned to ${names[activeTurn]}`);
+        }
+      }, [times]);
+
+      // ── Reset the timeout-advance guard whenever the active player changes
+      useEffect(() => {
+        turnAutoAdvancedRef.current = false;
+      }, [activeTurn]);
+
+      // ── Auto-advance turn when the active player's clock hits zero
+      useEffect(() => {
+        if (times[activeTurn] > 0 || turnAutoAdvancedRef.current) return;
+        turnAutoAdvancedRef.current = true;
+        const newDeadList = names.map((_, i) =>
+          (eliminated.includes(i) || times[i] <= 0) ? i : -1
+        ).filter(i => i >= 0);
+        const next = nextAlive(activeTurn, numPlayers, newDeadList);
+        if (next !== activeTurn) {
+          setAT(next);
+          setPriority(next);
+          setTurnNum(n => n + 1);
+          addLog(`${names[activeTurn]}'s time is up — turn passes to ${names[next]}`);
+        }
+      }, [times]);
+
+      const claimPriority = (idx) => {
+        if (paused || dead(idx)) return;
+        setPriority(idx);
+        addLog(`${names[idx]} claimed priority`);
+      };
+
+      const passPriority = () => {
+        if (paused || dead(activeTurn)) return;
+        setPriority(activeTurn);
+        addLog(`Priority passed back to ${names[activeTurn]}`);
+      };
+
+      const endTurn = () => {
+        if (paused) return;
+        const next = nextAlive(activeTurn, numPlayers, deadList);
+        setAT(next);
+        setPriority(next);
+        setTurnNum(n => n + 1);
+        addLog(`Turn ${turnNum + 1}: ${names[next]}'s turn begins`);
+      };
+
+      const eliminate = (idx) => {
+        const newElim     = [...eliminated, idx];
+        const newDeadList = [...newElim, ...names.map((_, i) => outOfTime[i] ? i : -1).filter(i => i >= 0)];
+        setElim(newElim);
+        addLog(`${names[idx]} has been eliminated from the game`);
+
+        if (activeTurn === idx) {
+          // Eliminated on their own turn — advance turn to next alive player
+          const next = nextAlive(idx, numPlayers, newDeadList);
+          if (next !== idx) { setAT(next); setPriority(next); setTurnNum(n => n + 1); }
+        } else if (priority === idx) {
+          // Eliminated while holding priority during someone else's turn —
+          // return priority to the active player only, do not advance the turn
+          if (!newDeadList.includes(activeTurn)) {
+            setPriority(activeTurn);
+          }
+        }
+      };
+
+      // ── Clockwise layout ─────────────────────────────────────────────────────
+      // 4P: top-left=P1, top-right=P2, bottom-left=P4, bottom-right=P3
+      // 3P: top-left=P1, top-right=P2, bottom-center=P3
+      // 2P: top=P2 (flipped), bottom=P1
+      const layoutOrder =
+        numPlayers === 4 ? [0, 1, 3, 2] :
+        numPlayers === 3 ? [0, 1, 2]    :
+                           [1, 0];
+
+      const flippedPositions = numPlayers === 2 ? [0] : [0, 1];
+      const gridCols         = numPlayers === 2 ? "1fr" : "1fr 1fr";
+      const topPlayers       = layoutOrder.slice(0, flippedPositions.length);
+      const bottomPlayers    = layoutOrder.slice(flippedPositions.length);
+
+      const ctrlBtn = (color) => ({
+        padding: "7px 14px",
+        background: color ? `${color}18` : P.btnBg,
+        border: `1px solid ${color ? color + "45" : P.btnBorder}`,
+        borderRadius: "6px",
+        color: color || P.btnClr,
+        fontFamily: "'Cinzel', serif",
+        fontSize: "9px", letterSpacing: "2px",
+        cursor: "pointer",
+        transition: "background 0.3s, color 0.3s, border-color 0.3s",
+      });
+
+      const cardWrapper = (playerIdx, flipped, spanBoth) => (
+        <div
+          key={playerIdx}
+          style={{
+            gridColumn: spanBoth ? "1 / -1" : undefined,
+            transform: flipped ? "rotate(180deg)" : "none",
+            transformOrigin: "center center",
+            height: "100%", width: "100%",
+          }}
+        >
+          <PlayerCard
+            P={P}
+            idx={playerIdx}
+            name={names[playerIdx]}
+            time={times[playerIdx]}
+            totalTime={seconds}
+            isTurn={activeTurn === playerIdx}
+            isPriority={priority === playerIdx}
+            isElim={eliminated.includes(playerIdx)}
+            isDead={outOfTime[playerIdx]}
+            paused={paused}
+            stormWarning={stormWarning && priority === playerIdx}
+            onClaim={() => claimPriority(playerIdx)}
+            onEndTurn={endTurn}
+          />
+        </div>
+      );
+
+      return (
+        <div className="edh-fade-up" style={{
+          minHeight: "100vh",
+          background: P.pageBg("game"),
+          display: "flex", flexDirection: "column",
+          padding: "12px", gap: "10px",
+          transition: "background 0.4s",
+        }}>
+
+          {/* ── Header ── */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontFamily: "'Cinzel', serif", fontSize: "9px", letterSpacing: "3px", color: P.headerClr }}>
+              TURN CLOCK · T{turnNum}
+            </div>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <button className="edh-btn" onClick={toggleDark} style={ctrlBtn()}>
+                {P.toggleLabel}
+              </button>
+              {!confirmReset
+                ? <button className="edh-btn" onClick={() => setCR(true)} style={ctrlBtn()}>↺ RESET</button>
+                : <button className="edh-btn" onClick={onReset} style={ctrlBtn("#e05252")}>CONFIRM RESET?</button>
+              }
+            </div>
+          </div>
+
+          {/* ── Status banner ── */}
+          <div style={{
+            padding: "9px 16px",
+            background: P.statusBg, border: `1px solid ${P.statusBorder}`,
+            borderRadius: "7px", textAlign: "center",
+            fontFamily: "'Cinzel', serif", fontSize: "11px", letterSpacing: "1px",
+            minHeight: "38px", display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "background 0.4s",
+          }}>
+            {paused ? (
+              <span style={{ color: "#f39c12" }}>⏸ &nbsp; GAME PAUSED</span>
+            ) : (
+              <span style={{ color: P.statusClr }}>
+                TURN:&nbsp;
+                <span style={{ color: THEMES[activeTurn].accent, fontWeight: 700 }}>{names[activeTurn]}</span>
+                {priority !== activeTurn && (
+                  <React.Fragment>
+                    &nbsp;·&nbsp;PRIORITY:&nbsp;
+                    <span style={{ color: THEMES[priority].accent, fontWeight: 700 }}>{names[priority]}</span>
+                  </React.Fragment>
+                )}
+                {stormWarning && (
+                  <React.Fragment>
+                    &nbsp;·&nbsp;
+                    <span className="edh-storm-badge" style={{ color: "#e05252", fontWeight: 700 }}>⚡ STORM</span>
+                  </React.Fragment>
+                )}
+              </span>
+            )}
+          </div>
+
+          {/* ── Player grid ── */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: gridCols,
+            gridTemplateRows: "1fr auto 1fr",
+            gap: "8px",
+            flex: 1,
+          }}>
+            {topPlayers.map(idx => cardWrapper(idx, true, false))}
+
+            {/* Center row — Pause and Pass Priority, reachable from any seat */}
+            <div style={{
+              gridColumn: "1 / -1",
+              display: "flex", justifyContent: "center", alignItems: "center",
+              gap: "10px",
+              padding: "2px 0",
+            }}>
+              {priority !== activeTurn && !dead(activeTurn) && (
+                <button className="edh-btn" onClick={passPriority} disabled={paused} style={{
+                  padding: "10px 24px",
+                  background: P.btnBg,
+                  border: `1px solid #d4a01745`,
+                  borderRadius: "999px",
+                  color: "#d4a017",
+                  fontFamily: "'Cinzel', serif", fontSize: "10px", letterSpacing: "2px",
+                  transition: "all 0.2s ease",
+                }}>
+                  ← PASS PRIORITY
+                </button>
+              )}
+              <button
+                className="edh-btn"
+                onClick={() => { setPaused(p => !p); setCR(false); }}
+                style={{
+                  padding: "10px 48px",
+                  background: paused ? "linear-gradient(135deg, #123a18, #1a7a30)" : P.pauseBg,
+                  border: `1px solid ${paused ? "#27ae60" : P.pauseBorder}`,
+                  borderRadius: "999px",
+                  color: paused ? "#b8f0c8" : P.pauseClr,
+                  fontFamily: "'Cinzel', serif", fontSize: "10px", letterSpacing: "3px",
+                  boxShadow: paused ? "0 0 18px rgba(39,174,96,0.25)" : "none",
+                  transition: "all 0.2s ease", minWidth: "180px",
+                }}
+              >
+                {paused ? "▶  RESUME" : "⏸  PAUSE"}
+              </button>
+            </div>
+
+            {bottomPlayers.map((idx, i) => cardWrapper(idx, false, numPlayers === 3 && i === 0))}
+          </div>
+
+          {/* ── Bottom controls ── */}
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+
+            {/* Eliminate section */}
+            {names.some((_, i) => !eliminated.includes(i) && times[i] > 0) && (
+              <div style={{
+                display: "flex", flexDirection: "column", gap: "6px",
+                borderTop: `1px solid ${P.elimBorder}`, paddingTop: "10px", width: "100%",
+              }}>
+                <div style={{ fontFamily: "'Cinzel', serif", fontSize: "8px", letterSpacing: "3px", color: P.elimLabelClr }}>
+                  ✕ ELIMINATE PLAYER
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {names.map((name, i) =>
+                    !eliminated.includes(i) && times[i] > 0 ? (
+                      confirmedElim === i ? (
+                        <button key={i} className="edh-btn"
+                          onClick={() => { eliminate(i); setCE(null); }}
+                          style={{
+                            padding: "11px 18px",
+                            background: `${THEMES[i].accent}30`,
+                            border: `2px solid ${THEMES[i].accent}`,
+                            borderRadius: "8px", color: THEMES[i].accent,
+                            fontFamily: "'Cinzel', serif",
+                            fontSize: "11px", letterSpacing: "1px", fontWeight: 700,
+                            boxShadow: `0 0 12px ${THEMES[i].glow}`,
+                            display: "flex", alignItems: "center", gap: "8px",
+                          }}>
+                          ✕ CONFIRM — {name}
+                        </button>
+                      ) : (
+                        <button key={i} className="edh-btn"
+                          onClick={() => setCE(i)}
+                          style={{
+                            padding: "11px 18px",
+                            background: `${THEMES[i].accent}0d`,
+                            border: `1px solid ${THEMES[i].accent}40`,
+                            borderRadius: "8px", color: `${THEMES[i].accent}bb`,
+                            fontFamily: "'Cinzel', serif",
+                            fontSize: "11px", letterSpacing: "1px",
+                            display: "flex", alignItems: "center", gap: "9px",
+                          }}>
+                          <span style={{
+                            width: "9px", height: "9px", borderRadius: "50%",
+                            background: THEMES[i].accent,
+                            boxShadow: `0 0 6px ${THEMES[i].glow}`,
+                            flexShrink: 0,
+                          }} />
+                          {name}
+                        </button>
+                      )
+                    ) : null
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Log toggle */}
+            <button
+              className="edh-btn"
+              onClick={() => setShowLog(s => !s)}
+              style={{
+                marginLeft: "auto", background: "none", border: "none",
+                color: P.logToggleClr,
+                fontFamily: "'Cinzel', serif", fontSize: "9px", letterSpacing: "2px",
+                cursor: "pointer", padding: "6px",
+              }}
+            >
+              {showLog ? "▲ LOG" : "▼ LOG"}
+            </button>
+          </div>
+
+          {/* ── Activity log ── */}
+          {showLog && (
+            <div style={{
+              maxHeight: "130px", overflowY: "auto",
+              background: P.logBg, border: `1px solid ${P.logBorder}`,
+              borderRadius: "6px", padding: "8px 12px",
+              fontFamily: "'Share Tech Mono', monospace",
+              fontSize: "11px", color: P.logClr,
+              transition: "background 0.4s",
+            }}>
+              {log.slice().reverse().map((e, i) => (
+                <div key={i} style={{
+                  padding: "3px 0", borderBottom: `1px solid ${P.logRowBorder}`,
+                  display: "flex", gap: "8px",
+                }}>
+                  <span style={{ color: P.logTurnClr, flexShrink: 0 }}>T{e.t}</span>
+                  <span>{e.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Hint ── */}
+          <div style={{
+            textAlign: "center", fontFamily: "serif",
+            fontSize: "11px", color: P.hintClr, fontStyle: "italic", lineHeight: 1.5,
+          }}>
+            Tap anywhere on a player's card to give them priority · Tap ← END TURN to advance the active player · Eliminate to skip a player permanently
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Root ─────────────────────────────────────────────────────────────────
+    function App() {
+      const [config, setConfig] = useState(null);
+      const [darkMode, setDark] = useState(false);
+      const toggleDark          = () => setDark(d => !d);
+
+      return config
+        ? <Game  config={config} onReset={() => setConfig(null)} darkMode={darkMode} toggleDark={toggleDark} />
+        : <Setup onStart={setConfig}                             darkMode={darkMode} toggleDark={toggleDark} />;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
